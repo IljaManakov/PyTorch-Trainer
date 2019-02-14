@@ -95,7 +95,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
                 self.dataloader.dataset.close()
             if hasattr(self, 'save'):
                 self.save(force=True)
-            if hasattr(self, 'storage') and and hasattr(self.storage, 'close'):
+            if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
                 self.storage.close()
 
     def _transform(self, sample):
