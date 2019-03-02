@@ -386,3 +386,27 @@ class MonitorMixin(TrainerMixin):
             group[key] = results
 
         self.storage.flush()
+
+
+class CheckpointMixin(object):
+
+    checkpoint = None
+
+    def load_checkpoint(self, checkpoint):
+
+        self.checkpoint = pt.load(checkpoint)
+        self._load()
+
+    def _load(self):
+
+        if hasattr(self, 'model') and 'model' in self.checkpoint.keys():
+            print('loading model checkpoint...', end='')
+            model = getattr(self, 'model')
+            model.load_state_dict(self.checkpoint['model'])
+            print('done!')
+
+        if hasattr(self, 'optimizer') and 'optimizer' in self.checkpoint.keys():
+            print('loading optimizer checkpoint...', end='')
+            optimizer = getattr(self, 'optimizer')
+            optimizer.load_state_dict(self.checkpoint['optimizer'])
+            print('done!')

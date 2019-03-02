@@ -26,10 +26,10 @@ from collections import Sequence
 import numpy as np
 import torch as pt
 
-from .mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin
+from .mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin, CheckpointMixin
 
 
-class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin):
+class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin, CheckpointMixin):
     """class that implements the basic logic of training a model for streamlined training"""
 
     def __init__(self, model, criterion, optimizer, dataloader,
