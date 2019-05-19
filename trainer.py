@@ -22,14 +22,16 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 """
 
 from collections import Sequence
+from inspect import getmro
 
 import numpy as np
 import torch as pt
 
-from .mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin, CheckpointMixin
+from mixins import EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin
+import events
 
 
-class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpyMixin, CheckpointMixin):
+class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin):
     """class that implements the basic logic of training a model for streamlined training"""
 
     def __init__(self, model, criterion, optimizer, dataloader,
@@ -60,6 +62,10 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
         self.steps = 0
         self.call_after_single_step = []
         self.split_sample = split_sample if callable(split_sample) else self._split_sample
+        self.events = {'before_training': [Trainer.before_training],
+                       'each_step': [],
+                       'each_epoch': [],
+                       'after_training': []}
 
         super().__init__()
 
@@ -72,6 +78,17 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
         if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
             self.storage.close()
 
+    def before_training(self):
+        """
+        gather event methods from mixins
+        :return: None
+        """
+        mro = getmro(self.__class__)[1:]
+        for cls in mro:
+            for event in [events.events]:
+                if hasattr(cls, event):
+                    self.events[event].append(getattr(cls, event))
+
     def train(self, *, n_epochs=None, n_steps=None):
         """
         train the model
@@ -80,6 +97,9 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
         """
 
         try:
+            for event in self.events[events.BEFORE_TRAINING]:
+                event(self)
+
             if n_epochs is None and n_steps is None:
                 raise ValueError('either n_epochs or n_steps need to be specified')
 
@@ -111,15 +131,19 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
                     if step == n_steps:
                         return
 
+                    for event in self.events[events.EACH_STEP]:
+                        event(self)
+
+                for event in self.events[events.EACH_EPOCH]:
+                    event(self)
+
                 self.epochs += 1
 
         finally:
             if hasattr(self.dataloader.dataset, 'close'):
                 self.dataloader.dataset.close()
-            if hasattr(self, 'save'):
-                self.save(force=True)
-            if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
-                self.storage.close()
+            for event in self.events[events.AFTER_TRAINING]:
+                event(self)
 
     def _transform(self, sample):
         """
@@ -179,7 +203,6 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
         :param loss: current loss
         """
 
-        # step += 1
         steps_in_epoch = len(self.dataloader)
         n_steps = n_steps if n_steps is not None else n_epochs * steps_in_epoch - 1
         steps_taken = epoch * steps_in_epoch + step
@@ -188,7 +211,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, ToNumpy
         print(f'progress: {progress}%, epoch: {epoch}, step: {step}, loss: {loss}')
 
     @staticmethod
-    def _split_sample(self, sample):
+    def _split_sample(sample):
         """
         default function for splitting samples from the dataloader into model inputs and targets
         :param sample: sample from dataloader
