@@ -34,7 +34,7 @@ import events
 class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin):
     """class that implements the basic logic of training a model for streamlined training"""
 
-    def __init__(self, model, criterion, optimizer, dataloader,
+    def __init__(self, *, model, criterion, optimizer, dataloader,
                  transformation=lambda x: x, loss_decay=0.95,
                  split_sample=None):
         """
@@ -132,10 +132,10 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
                         return
 
                     for event in self.events[events.EACH_STEP]:
-                        event(self)
+                        event(self, step=step)
 
                 for event in self.events[events.EACH_EPOCH]:
-                    event(self)
+                    event(self, epoch=epoch)
 
                 self.epochs += 1
 
