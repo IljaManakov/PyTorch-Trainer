@@ -139,7 +139,7 @@ class EventSaveMixin(SaveMixin):
     @staticmethod
     def setup_saving(*, directory='./', save_config=None, event=events.EACH_EPOCH, interval=1):
         """
-        register an event for interval based saving
+        register event for interval based saving
         :param directory: directory in which to save
         :param save_config: config with the classes that should be saved, default=None results in default config
         :param event: event type that will be registered, default=events.EACH_EPOCH
@@ -150,10 +150,13 @@ class EventSaveMixin(SaveMixin):
         save_config = save_config if save_config is not None else EventSaveMixin.default_save_config()
 
         # modify save method to include interval, directory and save_config
-        new_save = IntervalBased(interval)(partial(SaveMixin.save, save_config=save_config, directory=directory))
+        save = partial(SaveMixin.save, save_config=save_config, directory=directory)
+        new_save = IntervalBased(interval)(save)
 
         # create event method
+        setattr(EventSaveMixin, events.AFTER_TRAINING, save)
         setattr(EventSaveMixin, event, new_save)
+        setattr(EventSaveMixin, 'save_on_event', new_save)
 
     @staticmethod
     def default_save_config():
@@ -217,10 +220,11 @@ class EventValidationMixin(ValidationMixin):
 
         # create event method
         setattr(EventValidationMixin, event, new_validate)
+        setattr(EventValidationMixin, 'validate_on_event', new_validate)
 
 
 class TestSampleMixin(object):
-    """used to perform inference on a single fixed sample at regular intervals for tracking training progress"""
+    """used to perform inference on a single sample"""
 
     def test_on_sample(self, sample, model, criterion, *args, **kwargs):
         """
@@ -238,6 +242,7 @@ class TestSampleMixin(object):
 
 
 class EventTestSampleMixin(TestSampleMixin):
+    """used to perform inference on a single sample at regular intervals for tracking training progress"""
 
     @staticmethod
     def setup_test_sample(*, sample, model, criterion, event=events.EACH_EPOCH, interval=1):
@@ -256,6 +261,7 @@ class EventTestSampleMixin(TestSampleMixin):
         new_test_on_sample = IntervalBased(interval)(new_test_on_sample)
 
         setattr(EventTestSampleMixin, event, new_test_on_sample)
+        setattr(EventTestSampleMixin, 'test_on_sample_on_event', new_test_on_sample)
 
 
 class MonitorMixin(object):
@@ -264,8 +270,9 @@ class MonitorMixin(object):
     def setup_monitoring(self, filename, exclusions=('setup', 'train')):
         """gather public methods for monitoring"""
 
-        setattr(MonitorMixin, events.BEFORE_TRAINING, lambda: (self._open_storage(filename), self._wrap_methods(exclusions)))
-        setattr(MonitorMixin, events.AFTER_TRAINING, lambda: getattr(self, 'storage').close())
+        setattr(MonitorMixin, events.BEFORE_TRAINING, lambda obj: (MonitorMixin._open_storage(obj, filename),
+                                                                   MonitorMixin._wrap_methods(obj, exclusions)))
+        setattr(MonitorMixin, events.AFTER_TRAINING, lambda obj: getattr(obj, 'storage').close())
 
     def _open_storage(self, filename):
 
