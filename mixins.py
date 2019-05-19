@@ -29,13 +29,8 @@ from time import ctime
 
 import h5py
 import torch as pt
-from torch.utils.data import DataLoader
-
 sys.path.extend(['/home/kazuki/Documents/Promotion/Project_Helpers/trainer'])
 import events
-
-
-# TODO: make sure the names of the funcitons on the events are correct (for monitoring)
 
 
 def to_numpy(sample):
@@ -49,10 +44,10 @@ def to_numpy(sample):
     elif isinstance(sample, pt.Tensor):
         return sample.detach().cpu().numpy()
     elif isinstance(sample, tuple) or isinstance(sample, list):
-        return [SaveMixin._to_numpy(s) for s in sample]
+        return [to_numpy(s) for s in sample]
     elif isinstance(sample, Sequence):
         collection = sample.__class__
-        return collection(*[SaveMixin._to_numpy(s) for s in sample])
+        return collection(*[to_numpy(s) for s in sample])
 
 
 class IntervalBased(object):
@@ -142,7 +137,15 @@ class SaveMixin(object):
 class EventSaveMixin(SaveMixin):
 
     @staticmethod
-    def setup_saving(self, *, directory='./', save_config=None, event=events.EACH_EPOCH, interval=1):
+    def setup_saving(*, directory='./', save_config=None, event=events.EACH_EPOCH, interval=1):
+        """
+        register an event for interval based saving
+        :param directory: directory in which to save
+        :param save_config: config with the classes that should be saved, default=None results in default config
+        :param event: event type that will be registered, default=events.EACH_EPOCH
+        :param interval: interval at which the testing should occur, default=1
+        :return: None
+        """
 
         save_config = save_config if save_config is not None else EventSaveMixin.default_save_config()
 
@@ -154,7 +157,8 @@ class EventSaveMixin(SaveMixin):
 
     @staticmethod
     def default_save_config():
-        """initialize the default save config"""
+        """initialize the default save config that saves pytorch Modules, Tensors and Optimizers
+         as well as strings, floats and ints. If apex is installed FP16_Optimizers are also saved"""
         save_config = {pt.nn.Module: 'state_dict',
                        pt.optim.Optimizer: 'state_dict',
                        pt.Tensor: '_to_numpy',
@@ -203,7 +207,7 @@ class EventValidationMixin(ValidationMixin):
     @staticmethod
     def setup_validation(*, dataloader, forward_pass, event=events.EACH_EPOCH, interval=1):
         """
-        initialize validation mixin
+        register an event for interval based validation
         :param dataloader: pytorch dataloader over the validation set
         :param interval: frequency of validation
         """
@@ -237,6 +241,15 @@ class EventTestSampleMixin(TestSampleMixin):
 
     @staticmethod
     def setup_test_sample(*, sample, model, criterion, event=events.EACH_EPOCH, interval=1):
+        """
+        register an event for periodic tests on a given sample
+        :param sample: sample to test on
+        :param model: model to test
+        :param criterion: criterion for loss calculation
+        :param event: which event to register, deflaut=events.EACH_EPOCH
+        :param interval: interval at which the testing should occur, default=1
+        :return: None
+        """
 
         # modify sample test method to include interval, sample, model and criterion
         new_test_on_sample = partial(EventTestSampleMixin.test_on_sample, sample=sample, model=model, criterion=criterion)
@@ -251,7 +264,23 @@ class MonitorMixin(object):
     def setup_monitoring(self, filename, exclusions=('setup', 'train')):
         """gather public methods for monitoring"""
 
-        super(MonitorMixin, self).__init__()
+        setattr(MonitorMixin, events.BEFORE_TRAINING, lambda: (self._open_storage(filename), self._wrap_methods(exclusions)))
+        setattr(MonitorMixin, events.AFTER_TRAINING, lambda: getattr(self, 'storage').close())
+
+    def _open_storage(self, filename):
+
+        # open hdf5 file
+        if os.path.isfile(filename):
+            mode = 'w'
+        else:
+            mode = 'a'
+
+        if not hasattr(self, 'storage'):
+            setattr(self, 'storage', h5py.File(filename, mode, libver='latest'))
+        storage = getattr(self, 'storage')
+        storage.swmr_mode = True
+
+    def _wrap_methods(self, exclusions):
 
         monitored = []
         for entry in self.__dir__():
@@ -268,29 +297,18 @@ class MonitorMixin(object):
             elif hasattr(super(self.__class__, self), entry):
                 monitored.append(entry)
 
-        self.monitored = monitored
-
-
-        """
-        initialize monitoring
-        :param filename: filename of the hdf5 file
-        :param exclusions: sequence of (parts of) method names that should be excluded from monitoring
-        """
-        # open hdf5 file
-        if os.path.isfile(filename):
-            mode = 'w'
-        else:
-            mode = 'a'
-        self.storage = h5py.File(filename, mode, libver='latest')
-        self.storage.swmr_mode = True
-
         # remove excluded methods from monitoring
-        self.monitored = [method for method in self.monitored
-                          if not any([exclusion in method for exclusion in exclusions])]
+        monitored = [method for method in monitored if not any([exclusion in method for exclusion in exclusions])]
 
         # replace method with wrapped version of itself
-        for method in self.monitored:
+        for method in monitored:
             setattr(self, method, self._monitor(getattr(self, method)))
+
+        print('\nmonitoring following methods:')
+        print('-----------------------------')
+        for method in monitored:
+            print(method)
+        print()
 
     def _monitor(self, func):
         """
@@ -298,8 +316,10 @@ class MonitorMixin(object):
         :param func: method to wrap
         :return: wrapped method
         """
-
-        group = self.storage.require_group(func.__name__)
+        if type(func) is partial:
+            name = func.func.__name__
+        else:
+            name = func.__name__
 
         @wraps(func)
         def monitored(*args, step=None, **kwargs):
@@ -311,20 +331,31 @@ class MonitorMixin(object):
 
             # only write to storage if method returns something
             if results is not None:
-                self._store(results, group, step)
+                self._store(results, name, step)
 
             return results
 
         return monitored
 
-    def _store(self, results, group, step):
+    def _store(self, results, group_name, step):
         """
         writes results to specified group in the hdf5 file
         :param results: results as returned by some method
-        :param group: hdf5 group object in the hdf5 file
+        :param group_name: name of hdf5 group object in the hdf5 file
         """
 
+        storage = getattr(self, 'storage', None)
+
+        # check if storage is initialized
+        if storage is None:
+            return None
+
+        # check if storage is open
+        if storage.name is None:
+            return None
+
         key = f'{step}'
+        group = storage.require_group(group_name)
 
         # case where the result has internal structure (i.e. is an object)
         if hasattr(results, '__dict__'):
@@ -347,133 +378,44 @@ class MonitorMixin(object):
         else:
             group[key] = results
 
-        self.storage.flush()
-
-
-class MonitorMixin(object):
-    """used to monitor and store outputs of public methods to a hdf5 file"""
-
-    monitored = None
-    storage = None
-
-    def __init__(self):
-        """gather public methods for monitoring"""
-
-        super(MonitorMixin, self).__init__()
-
-        monitored = []
-        for entry in self.__dir__():
-
-            # exclude entry if it is protected/private or not callable
-            if entry.startswith('_'):
-                continue
-            if not callable(getattr(self, entry)):
-                continue
-
-            # make sure callable is not an attribute of a an attribute (i.e. a stored class)
-            if entry in self.__class__.__dict__.keys():
-                monitored.append(entry)
-            elif hasattr(super(self.__class__, self), entry):
-                monitored.append(entry)
-
-        self.monitored = monitored
-
-    def setup_monitoring(self, filename, exclusions=('setup', 'train')):
-        """
-        initialize monitoring
-        :param filename: filename of the hdf5 file
-        :param exclusions: sequence of (parts of) method names that should be excluded from monitoring
-        """
-        # open hdf5 file
-        if os.path.isfile(filename):
-            mode = 'w'
-        else:
-            mode = 'a'
-        self.storage = h5py.File(filename, mode, libver='latest')
-        self.storage.swmr_mode = True
-
-        # remove excluded methods from monitoring
-        self.monitored = [method for method in self.monitored
-                          if not any([exclusion in method for exclusion in exclusions])]
-
-        # replace method with wrapped version of itself
-        for method in self.monitored:
-            setattr(self, method, self._monitor(getattr(self, method)))
-
-    def _monitor(self, func):
-        """
-        wraps a method and stores return values in the hdf5 file before returning them
-        :param func: method to wrap
-        :return: wrapped method
-        """
-
-        group = self.storage.require_group(func.__name__)
-
-        @wraps(func)
-        def monitored(*args, **kwargs):
-
-            results = func(*args, **kwargs)
-
-            # only write to storage if method returns something
-            if results is not None:
-                self._store(results, group)
-
-            return results
-
-        return monitored
-
-    def _store(self, results, group, step):
-        """
-        writes results to specified group in the hdf5 file
-        :param results: results as returned by some method
-        :param group: hdf5 group object in the hdf5 file
-        """
-
-        key = f'{step}'
-
-        # case where the result has internal structure (i.e. is an object)
-        if hasattr(results, '__dict__'):
-
-            # obtain public fields from the object
-            fields = [field for field in results.__dict__ if not field.startswith('_')]
-            for field in fields:
-                key = '/'.join([key, field])
-                group[key] = getattr(results, field)
-
-        # case where the result is a namedtuple
-        elif hasattr(results, '_fields'):
-
-            # obtain fields from namedtuple
-            for field in getattr(results, '_fields'):
-                field_key = '/'.join([key, field])
-                group[field_key] = getattr(results, field)
-
-        # default case
-        else:
-            group[key] = results
-
-        self.storage.flush()
+        storage.flush()
 
 
 class CheckpointMixin(object):
 
-    checkpoint = None
+    def load(self, checkpoint):
+        """
+        load a checkpoint that can contain model and optimizer state
+        :param checkpoint: filename of the checkpoint
+        :return: None
+        """
 
-    def load_checkpoint(self, checkpoint):
+        checkpoint = pt.load(checkpoint)
 
-        self.checkpoint = pt.load(checkpoint)
-        self._load()
-
-    def _load(self):
-
-        if hasattr(self, 'model') and 'model' in self.checkpoint.keys():
-            print('loading model checkpoint...', end='')
+        # load model state
+        if hasattr(self, 'model') and 'model' in checkpoint.keys():
+            print('loading model checkpoint ...', end='')
             model = getattr(self, 'model')
-            model.load_state_dict(self.checkpoint['model'])
+            model.load_state_dict(checkpoint['model'])
             print('done!')
 
-        if hasattr(self, 'optimizer') and 'optimizer' in self.checkpoint.keys():
+        # load optimizer state
+        if hasattr(self, 'optimizer') and 'optimizer' in checkpoint.keys():
             print('loading optimizer checkpoint...', end='')
             optimizer = getattr(self, 'optimizer')
-            optimizer.load_state_dict(self.checkpoint['optimizer'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
             print('done!')
+
+
+class EventCheckpointMixin(CheckpointMixin):
+
+    @staticmethod
+    def setup_loading_chechpoint(*, checkpoint):
+        """
+        register an event to load a checkpoint before training
+        :param checkpoint: filename of the checkpoint
+        :return: None
+        """
+
+        load_checkpoint = partial(CheckpointMixin.load, checkpoint=checkpoint)
+        setattr(EventTestSampleMixin, events.BEFORE_TRAINING, load_checkpoint)
