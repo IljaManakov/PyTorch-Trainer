@@ -5,6 +5,8 @@ EACH_EPOCH = 'each_epoch'
 BEFORE_TRAINING = 'before_training'
 AFTER_TRAINING = 'after_training'
 
+events = [BEFORE_TRAINING, EACH_STEP, EACH_EPOCH, AFTER_TRAINING]
+
 
 class TrainingEventConsumer(ABC):
 
