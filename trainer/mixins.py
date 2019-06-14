@@ -28,7 +28,7 @@ from time import ctime
 
 import h5py
 import torch as pt
-import events
+from trainer import events
 
 
 def to_numpy(sample):
