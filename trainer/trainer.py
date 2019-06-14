@@ -27,8 +27,8 @@ from inspect import getmro
 import numpy as np
 import torch as pt
 
-from mixins import EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin
-import events
+from trainer.mixins import EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin
+from trainer import events
 
 
 class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin):
