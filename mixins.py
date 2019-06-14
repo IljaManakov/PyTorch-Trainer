@@ -22,14 +22,12 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 """
 
 import os
-import sys
 from collections import Sequence, namedtuple
 from functools import wraps, partial
 from time import ctime
 
 import h5py
 import torch as pt
-sys.path.extend(['/home/kazuki/Documents/Promotion/Project_Helpers/trainer'])
 import events
 
 
@@ -265,16 +263,32 @@ class EventTestSampleMixin(TestSampleMixin):
 
 
 class MonitorMixin(object):
-    """used to monitor and store outputs of public methods to a hdf5 file"""
+    """
+    wraps public methods to intercept outputs and store them in a hdf5 file
+    """
 
     def setup_monitoring(self, filename, exclusions=('setup', 'train')):
-        """gather public methods for monitoring"""
+        """
+        registers two events, one before training for wrapping methods, the other after training for closing the hdf5
+        :param filename: filename of the hdf5 storage, will be created if it does not exist
+        :param exclusions: sequence of strings, methods that contain any of those strings will not be wrapped
+        :return: None
+        """
 
         setattr(MonitorMixin, events.BEFORE_TRAINING, lambda obj: (MonitorMixin._open_storage(obj, filename),
                                                                    MonitorMixin._wrap_methods(obj, exclusions)))
         setattr(MonitorMixin, events.AFTER_TRAINING, lambda obj: getattr(obj, 'storage').close())
 
     def _open_storage(self, filename):
+        """
+        creates or opens the hdf5 storage and appends it to instance attributes
+        :param filename: name of the hdf5 storage
+        :return: None
+        """
+
+        # create directory if necessary
+        if not os.path.isdir(os.path.dirname(filename)):
+            os.makedirs(os.path.dirname(filename))
 
         # open hdf5 file
         if os.path.isfile(filename):
@@ -288,7 +302,13 @@ class MonitorMixin(object):
         storage.swmr_mode = True
 
     def _wrap_methods(self, exclusions):
+        """
+        collect and wrap methods for monitoring
+        :param exclusions: strings that, if matched with the method name, will lead to exclusion
+        :return: None
+        """
 
+        # collect methods that will be wrapped
         monitored = []
         for entry in self.__dir__():
 
@@ -319,7 +339,7 @@ class MonitorMixin(object):
 
     def _monitor(self, func):
         """
-        wraps a method and stores return values in the hdf5 file before returning them
+        intercept return values of func and store them in the hdf5 file before returning them
         :param func: method to wrap
         :return: wrapped method
         """
