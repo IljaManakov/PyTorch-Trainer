@@ -24,7 +24,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 import os
 from collections import Sequence, namedtuple
 from functools import wraps, partial
-from time import ctime
+from time import time, ctime
 
 import h5py
 import torch as pt
@@ -78,7 +78,7 @@ class IntervalBased(object):
 class SaveMixin(object):
     """used to automatically collect objects of specified class and save them using pt.save"""
 
-    def save(self, save_config, checkpoint_name=None, directory='./', *args, **kwargs):
+    def save(self, *args,  save_config, checkpoint_name=None, directory='./', **kwargs):
         """
         create a checkpoint with all objects of the types specified in the save config
         :param save_config: dict that specifies which attributes to save. Keys should be classes and values conversion methods.
@@ -153,8 +153,8 @@ class EventSaveMixin(SaveMixin):
 
         # create event method
         setattr(EventSaveMixin, events.AFTER_TRAINING, save)
-        setattr(EventSaveMixin, event, new_save)
         setattr(EventSaveMixin, 'save_on_event', new_save)
+        setattr(EventSaveMixin, event, EventSaveMixin.save_on_event)
 
     @staticmethod
     def default_save_config():
@@ -182,7 +182,7 @@ class ValidationMixin(object):
     """
 
     @staticmethod
-    def validate(validation_loader, forward_pass, *args, **kwargs):
+    def validate(*args, validation_loader, forward_pass, **kwargs):
         """
         evaluate model on validation set
         :param validation_loader:
@@ -217,22 +217,22 @@ class EventValidationMixin(ValidationMixin):
         new_validate = IntervalBased(interval)(new_validate)
 
         # create event method
-        setattr(EventValidationMixin, event, new_validate)
         setattr(EventValidationMixin, 'validate_on_event', new_validate)
+        setattr(EventValidationMixin, event, EventValidationMixin.validate_on_event)
 
 
 class TestSampleMixin(object):
     """used to perform inference on a single sample"""
 
-    def test_on_sample(self, sample, model, criterion, *args, **kwargs):
+    def test_on_sample(self, *args, sample, model, criterion, **kwargs):
         """
         perform inference on the test sample
         :return: result of inference as namedtuple('prediction', 'loss')
         """
-
+        input, target = sample
         with pt.no_grad():
-            prediction = model(sample)
-            loss = criterion(prediction, sample)
+            prediction = model(input)
+            loss = criterion(prediction, target)
 
         prediction, loss = to_numpy((prediction, loss))
 
@@ -258,14 +258,19 @@ class EventTestSampleMixin(TestSampleMixin):
         new_test_on_sample = partial(EventTestSampleMixin.test_on_sample, sample=sample, model=model, criterion=criterion)
         new_test_on_sample = IntervalBased(interval)(new_test_on_sample)
 
-        setattr(EventTestSampleMixin, event, new_test_on_sample)
         setattr(EventTestSampleMixin, 'test_on_sample_on_event', new_test_on_sample)
+        setattr(EventTestSampleMixin, event, EventTestSampleMixin.test_on_sample_on_event)
 
 
 class MonitorMixin(object):
     """
     wraps public methods to intercept outputs and store them in a hdf5 file
     """
+
+    def __del__(self):
+        """make sure that storage is closed on deconstruction"""
+        if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
+            self.storage.close()
 
     def setup_monitoring(self, filename, exclusions=('setup', 'train')):
         """
@@ -354,7 +359,7 @@ class MonitorMixin(object):
             results = func(*args, **kwargs)
 
             if step is None:
-                step = f'{ctime().replace(" ", "-")}'
+                step = time()
 
             # only write to storage if method returns something
             if results is not None:
@@ -410,7 +415,7 @@ class MonitorMixin(object):
 
 class CheckpointMixin(object):
 
-    def load(self, checkpoint):
+    def load(self, *args, checkpoint):
         """
         load a checkpoint that can contain model and optimizer state
         :param checkpoint: filename of the checkpoint
