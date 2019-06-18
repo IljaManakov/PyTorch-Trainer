@@ -23,12 +23,17 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 
 from collections import Sequence
 from inspect import getmro
+import importlib.util
+import os
+import shutil
 
 import numpy as np
 import torch as pt
+from torch.utils.data import DataLoader
 
 from trainer.mixins import EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin
 from trainer import events
+from trainer.utils import weight_init
 
 
 class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin):
@@ -54,6 +59,7 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataloader = dataloader
+        self.logdir = '.'
         self.transformation = transformation
         self.cuda = next(model.parameters()).is_cuda
         self.dtype = next(model.parameters()).dtype
@@ -73,11 +79,6 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         if not hasattr(self.optimizer, 'backward'):
             setattr(self.optimizer, 'backward', self._backward)
 
-    def __del__(self):
-        """make sure that storage is closed on deconstruction"""
-        if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
-            self.storage.close()
-
     def before_training(self):
         """
         gather event methods from mixins
@@ -85,7 +86,7 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         """
         mro = getmro(self.__class__)[1:]
         for cls in mro:
-            for event in [events.events]:
+            for event in events.event_list:
                 if hasattr(cls, event):
                     self.events[event].append(getattr(cls, event))
 
@@ -111,10 +112,7 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
             for epoch in range(n_epochs):
                 for step, sample in enumerate(self.dataloader):
 
-                    try:
-                        loss = self.single_step(sample)
-                    except ValueError:
-                        continue
+                    loss = self.single_step(sample)
 
                     # execute additional methods inherited from mixins
                     for method in self.call_after_single_step:
@@ -151,8 +149,8 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         :param sample: sample to transform
         """
         sample = self.transformation(sample)
-        sample = self._cast(sample)
         inputs, targets = self.split_sample(sample)
+        inputs = self._cast(inputs)
 
         return inputs, targets
 
@@ -225,3 +223,33 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
     def _backward(loss):
 
         loss.backward()
+
+    @classmethod
+    def from_config(cls, filename):
+
+        # import config
+        spec = importlib.util.spec_from_file_location("config", filename)
+        config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config)
+        # config = importlib.import_module(filename)
+
+        # initialize output directory
+        if not os.path.isdir(config.LOGDIR):
+            os.makedirs(config.LOGDIR)
+
+        model = config.MODEL(**config.model)
+        model.apply(weight_init)
+        dataset = config.DATASET(**config.dataset)
+        dataloader = DataLoader(dataset, **config.dataloader)
+        criterion = config.LOSS(**config.loss)
+        optimizer = config.OPTIMIZER(model.parameters(), **config.optimizer)
+        if hasattr(config, 'APEX'):
+            optimizer = config.APEX(optimizer, **config.apex)
+        trainer = cls(model=model, criterion=criterion, optimizer=optimizer,
+                      dataloader=dataloader, **config.trainer)
+        trainer.logdir = config.LOGDIR
+
+        # save config
+        shutil.copy(config.__file__, config.LOGDIR)
+
+        return trainer
