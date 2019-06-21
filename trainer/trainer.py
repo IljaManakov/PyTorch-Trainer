@@ -22,7 +22,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 """
 
 from collections import Sequence
-from inspect import getmro
+from functools import partial
 import importlib.util
 import os
 import shutil
@@ -31,17 +31,16 @@ import numpy as np
 import torch as pt
 from torch.utils.data import DataLoader
 
-from trainer.mixins import EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin
+from trainer.mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin
 from trainer import events
-from trainer.utils import weight_init
+from trainer.utils import weight_init, IntervalBased
 
 
-class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, MonitorMixin, EventCheckpointMixin):
+class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin):
     """class that implements the basic logic of training a model for streamlined training"""
 
-    def __init__(self, *, model, criterion, optimizer, dataloader,
-                 transformation=lambda x: x, loss_decay=0.95,
-                 split_sample=None):
+    def __init__(self, *, model, criterion, optimizer, dataloader, logdir='.', storage='storage.hdf5',
+                 transformation=lambda x: x, loss_decay=0.95, split_sample=None):
         """
         initializes the Trainer object
         :param model: model implemented as a child of pt.nn.Module
@@ -59,7 +58,8 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataloader = dataloader
-        self.logdir = '.'
+        self.logdir = logdir
+        self.storage = self.open_storage(filename=os.path.join(logdir, storage))
         self.transformation = transformation
         self.cuda = next(model.parameters()).is_cuda
         self.dtype = next(model.parameters()).dtype
@@ -68,27 +68,16 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         self.steps = 0
         self.call_after_single_step = []
         self.split_sample = split_sample if callable(split_sample) else self._split_sample
-        self.events = {'before_training': [Trainer.before_training],
+        self.events = {'before_training': [],
                        'each_step': [],
                        'each_epoch': [],
-                       'after_training': []}
+                       'after_training': [self.close_storage]}
 
         super().__init__()
 
         # unify backward call for all types of optimizer
         if not hasattr(self.optimizer, 'backward'):
             setattr(self.optimizer, 'backward', self._backward)
-
-    def before_training(self):
-        """
-        gather event methods from mixins
-        :return: None
-        """
-        mro = getmro(self.__class__)[1:]
-        for cls in mro:
-            for event in events.event_list:
-                if hasattr(cls, event):
-                    self.events[event].append(getattr(cls, event))
 
     def train(self, *, n_epochs=None, n_steps=None):
         """
@@ -112,17 +101,15 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
             for epoch in range(n_epochs):
                 for step, sample in enumerate(self.dataloader):
 
-                    loss = self.single_step(sample)
-
-                    # execute additional methods inherited from mixins
-                    for method in self.call_after_single_step:
-                        getattr(self, method)()
+                    prediction, loss = self.forward_pass(sample)
+                    self.backward_pass(loss)
+                    loss = self.to_numpy(loss)
 
                     # update cumulative loss and print current progress
                     if cumulative_loss is None:
                         cumulative_loss = np.sum([loss])
                     cumulative_loss = round(self.loss_decay*cumulative_loss + (1-self.loss_decay) * np.sum([loss]), 6)
-                    self._show_progress(epoch, step, n_epochs, n_steps, cumulative_loss)
+                    self.show_progress(epoch, step, n_epochs, n_steps, cumulative_loss)
 
                     # end training after n_steps if n_steps is set
                     self.steps += 1
@@ -130,10 +117,10 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
                         return
 
                     for event in self.events[events.EACH_STEP]:
-                        event(self, step=step)
+                        event(self, key=(epoch, step))
 
                 for event in self.events[events.EACH_EPOCH]:
-                    event(self, epoch=epoch)
+                    event(self, key=(epoch, step))
 
                 self.epochs += 1
 
@@ -169,7 +156,7 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         elif isinstance(sample, Sequence):
             return sample.__class__(([self._cast(s) for s in sample]))
 
-    def _forward(self, sample):
+    def forward_pass(self, sample):
 
         inputs, targets = self._transform(sample)
         outputs = self.model(inputs)
@@ -177,21 +164,13 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
 
         return outputs, loss
 
-    def single_step(self, sample):
-        """
-        implements the logic of a forward and backward pass of a single training step
-        :param sample: sample from the dataloader
-        :return: loss calculated on the current sample
-        """
+    def backward_pass(self, loss):
 
-        outputs, loss = self._forward(sample)
         self.optimizer.zero_grad()
         self.optimizer.backward(loss)
         self.optimizer.step()
 
-        return self._to_numpy(loss)
-
-    def _show_progress(self, epoch, step, n_epochs, n_steps, loss):
+    def show_progress(self, epoch, step, n_epochs, n_steps, loss):
         """
         print the current progress and loss
         :param epoch: current epoch
@@ -224,6 +203,23 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
 
         loss.backward()
 
+    def register_event_handler(self, event, handler, interval=None, monitor=True, name=None, **kwargs):
+        name = handler.__name__ if name is None else name
+
+        # make handler interval based
+        if interval:
+            handler = IntervalBased(interval)(handler)
+
+        # set defaults for handler
+        if kwargs:
+            handler = partial(handler, **kwargs)
+
+        # wrap method for monitoring (has to be an attribute to get correct name)
+        if monitor:
+            handler = self.monitor(name=name, method=handler)
+
+        self.events[event].append(handler)
+
     @classmethod
     def from_config(cls, filename):
 
@@ -245,11 +241,12 @@ class Trainer(EventSaveMixin, EventTestSampleMixin, EventValidationMixin, Monito
         optimizer = config.OPTIMIZER(model.parameters(), **config.optimizer)
         if hasattr(config, 'APEX'):
             optimizer = config.APEX(optimizer, **config.apex)
+        logdir = config.LOGDIR
+
         trainer = cls(model=model, criterion=criterion, optimizer=optimizer,
-                      dataloader=dataloader, **config.trainer)
-        trainer.logdir = config.LOGDIR
+                      dataloader=dataloader, logdir=logdir, **config.trainer)
 
         # save config
-        shutil.copy(config.__file__, config.LOGDIR)
+        shutil.copy(config.__file__, logdir)
 
         return trainer
