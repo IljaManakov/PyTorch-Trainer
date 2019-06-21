@@ -5,7 +5,7 @@ MODEL = FeedForward
 DATASET = MNIST
 LOSS = pt.nn.CrossEntropyLoss
 OPTIMIZER = pt.optim.Adam
-LOGDIR = './run1/'
+LOGDIR = './run1'
 
 model = {
     # model keyword arguments go here
@@ -28,6 +28,9 @@ optimizer = {
 }
 
 trainer = {
-    # trainer keyword arguments for split_sample or transformation go here
+    'storage': 'storage.hdf5',
+    'split_sample': lambda x: (x[0], x[1]),
+    'transformation': lambda x: x,
+    'loss_decay': 0.95
 }
 
