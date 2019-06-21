@@ -22,63 +22,19 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 """
 
 import os
-from collections import Sequence, namedtuple
-from functools import wraps, partial
+from collections import namedtuple
+from functools import wraps
 from time import time, ctime
 
 import h5py
 import torch as pt
-from trainer import events
-
-
-def to_numpy(sample):
-    """
-    convert individual and sequences of Tensors to numpy, while leaving strings, integers and floats unchanged
-    :param sample: individual or sequence of Tensors, ints, floats or strings
-    :return: same as sample but all Tensors are converted to numpy.ndarray
-    """
-    if isinstance(sample, int) or isinstance(sample, float) or isinstance(sample, str):
-        return sample
-    elif isinstance(sample, pt.Tensor):
-        return sample.detach().cpu().numpy()
-    elif isinstance(sample, tuple) or isinstance(sample, list):
-        return [to_numpy(s) for s in sample]
-    elif isinstance(sample, Sequence):
-        collection = sample.__class__
-        return collection(*[to_numpy(s) for s in sample])
-
-
-class IntervalBased(object):
-    """
-    used for decorating functions.
-    the function will then only be executed at set intervals
-    """
-    def __init__(self, interval):
-        """
-        :param interval: interval at which the function will be called
-        """
-        self.interval = interval
-        self.counter = 0
-
-    def __call__(self, func):
-        """
-        wraps function so that it is executed only at set interval
-        :param func: function to wrap
-        :return: wrapped function
-        """
-        @wraps(func)
-        def wrapped(*args, **kwargs):
-            self.counter += 1
-            if self.counter % self.interval == 0:
-                return func(*args, **kwargs)
-
-        return wrapped
+from trainer.utils import to_numpy
 
 
 class SaveMixin(object):
     """used to automatically collect objects of specified class and save them using pt.save"""
 
-    def save(self, *args,  save_config, checkpoint_name=None, directory='./', **kwargs):
+    def save(self, *args,  save_config=None, checkpoint_name=None, directory='./', **kwargs):
         """
         create a checkpoint with all objects of the types specified in the save config
         :param save_config: dict that specifies which attributes to save. Keys should be classes and values conversion methods.
@@ -86,6 +42,9 @@ class SaveMixin(object):
         :param directory: folder where checkpoints will be saved
         :return: filename of the saved checkpoint
         """
+
+        if save_config is None:
+            save_config = self.default_save_config.copy()
 
         # find all objects that need to be saved
         objects = {}
@@ -122,42 +81,17 @@ class SaveMixin(object):
         return checkpoint
 
     @staticmethod
-    def _to_numpy(sample):
+    def to_numpy(sample):
         """
         convert individual and sequences of Tensors to numpy, while leaving strings, integers and floats unchanged.
-        set up as bound method because of the way
+        set up as bound method because of the way conversion method lookup works in save
         :param sample: individual or sequence of Tensors, ints, floats or strings
         :return: same as sample but all Tensors are converted to numpy.ndarray
         """
         return to_numpy(sample)
 
-
-class EventSaveMixin(SaveMixin):
-
-    @staticmethod
-    def setup_saving(*, directory='./', save_config=None, event=events.EACH_EPOCH, interval=1):
-        """
-        register event for interval based saving
-        :param directory: directory in which to save
-        :param save_config: config with the classes that should be saved, default=None results in default config
-        :param event: event type that will be registered, default=events.EACH_EPOCH
-        :param interval: interval at which the testing should occur, default=1
-        :return: None
-        """
-
-        save_config = save_config if save_config is not None else EventSaveMixin.default_save_config()
-
-        # modify save method to include interval, directory and save_config
-        save = partial(SaveMixin.save, save_config=save_config, directory=directory)
-        new_save = IntervalBased(interval)(save)
-
-        # create event method
-        setattr(EventSaveMixin, events.AFTER_TRAINING, save)
-        setattr(EventSaveMixin, 'save_on_event', new_save)
-        setattr(EventSaveMixin, event, EventSaveMixin.save_on_event)
-
-    @staticmethod
-    def default_save_config():
+    @property
+    def default_save_config(self):
         """initialize the default save config that saves pytorch Modules, Tensors and Optimizers
          as well as strings, floats and ints. If apex is installed FP16_Optimizers are also saved"""
         save_config = {pt.nn.Module: 'state_dict',
@@ -182,16 +116,16 @@ class ValidationMixin(object):
     """
 
     @staticmethod
-    def validate(*args, validation_loader, forward_pass, **kwargs):
+    def validate(*args, dataloader, forward_pass, **kwargs):
         """
         evaluate model on validation set
-        :param validation_loader:
-        :param forward_pass:
+        :param dataloader: Dataloader with validation set
+        :param forward_pass: callable that returns (prediction, loss)
         :return: ndarray of losses
         """
 
         losses = []
-        for sample in validation_loader:
+        for sample in dataloader:
 
             with pt.no_grad():
                 try:
@@ -201,24 +135,6 @@ class ValidationMixin(object):
                 losses.append(to_numpy(loss))
 
         return losses
-
-
-class EventValidationMixin(ValidationMixin):
-
-    @staticmethod
-    def setup_validation(*, dataloader, forward_pass, event=events.EACH_EPOCH, interval=1):
-        """
-        register an event for interval based validation
-        :param dataloader: pytorch dataloader over the validation set
-        :param interval: frequency of validation
-        """
-        # modify validate method to include interval, dataloader and forward_pass
-        new_validate = partial(ValidationMixin.validate, validation_loader=dataloader, forward_pass=forward_pass)
-        new_validate = IntervalBased(interval)(new_validate)
-
-        # create event method
-        setattr(EventValidationMixin, 'validate_on_event', new_validate)
-        setattr(EventValidationMixin, event, EventValidationMixin.validate_on_event)
 
 
 class TestSampleMixin(object):
@@ -239,29 +155,6 @@ class TestSampleMixin(object):
         return namedtuple('test_on_sample', ('prediction', 'loss'))(prediction, loss)
 
 
-class EventTestSampleMixin(TestSampleMixin):
-    """used to perform inference on a single sample at regular intervals for tracking training progress"""
-
-    @staticmethod
-    def setup_test_sample(*, sample, model, criterion, event=events.EACH_EPOCH, interval=1):
-        """
-        register an event for periodic tests on a given sample
-        :param sample: sample to test on
-        :param model: model to test
-        :param criterion: criterion for loss calculation
-        :param event: which event to register, deflaut=events.EACH_EPOCH
-        :param interval: interval at which the testing should occur, default=1
-        :return: None
-        """
-
-        # modify sample test method to include interval, sample, model and criterion
-        new_test_on_sample = partial(EventTestSampleMixin.test_on_sample, sample=sample, model=model, criterion=criterion)
-        new_test_on_sample = IntervalBased(interval)(new_test_on_sample)
-
-        setattr(EventTestSampleMixin, 'test_on_sample_on_event', new_test_on_sample)
-        setattr(EventTestSampleMixin, event, EventTestSampleMixin.test_on_sample_on_event)
-
-
 class MonitorMixin(object):
     """
     wraps public methods to intercept outputs and store them in a hdf5 file
@@ -272,23 +165,12 @@ class MonitorMixin(object):
         if hasattr(self, 'storage') and hasattr(self.storage, 'close'):
             self.storage.close()
 
-    def setup_monitoring(self, filename, exclusions=('setup', 'train')):
-        """
-        registers two events, one before training for wrapping methods, the other after training for closing the hdf5
-        :param filename: filename of the hdf5 storage, will be created if it does not exist
-        :param exclusions: sequence of strings, methods that contain any of those strings will not be wrapped
-        :return: None
-        """
-
-        setattr(MonitorMixin, events.BEFORE_TRAINING, lambda obj: (MonitorMixin._open_storage(obj, filename),
-                                                                   MonitorMixin._wrap_methods(obj, exclusions)))
-        setattr(MonitorMixin, events.AFTER_TRAINING, lambda obj: getattr(obj, 'storage').close())
-
-    def _open_storage(self, filename):
+    @staticmethod
+    def open_storage(*, filename):
         """
         creates or opens the hdf5 storage and appends it to instance attributes
         :param filename: name of the hdf5 storage
-        :return: None
+        :return: h5py.File instance
         """
 
         # create directory if necessary
@@ -301,75 +183,66 @@ class MonitorMixin(object):
         else:
             mode = 'a'
 
-        if not hasattr(self, 'storage'):
-            setattr(self, 'storage', h5py.File(filename, mode, libver='latest'))
-        storage = getattr(self, 'storage')
-        storage.swmr_mode = True
+        storage = h5py.File(filename, mode, libver='latest', swmr=True)
 
-    def _wrap_methods(self, exclusions):
+        return storage
+
+    def close_storage(self, *args, **kwargs):
         """
-        collect and wrap methods for monitoring
-        :param exclusions: strings that, if matched with the method name, will lead to exclusion
+        generic method for closing storage
+        :param args: not used
+        :param kwargs: not used
         :return: None
         """
 
-        # collect methods that will be wrapped
-        monitored = []
-        for entry in self.__dir__():
+        storage = getattr(self, 'storage', None)
+        if storage is not None:
+            storage.close()
 
-            # exclude entry if it is protected/private or not callable
-            if entry.startswith('_'):
-                continue
-            if not callable(getattr(self, entry)):
-                continue
+    def monitor(self, *, name, method=None):
+        """
+        wrap a funciton to intercept its results. If only a name is specified, method is retrieved from self and
+        will be replaced with wrapped version. If name and method are specified wrapped function will be returned instead.
+        :param name: name of the function / method
+        :param method: callable to wrap. If this argument is specified, the passed callable will be wrapped and returned.
+        Otherwilse, the method will be retrieved from self via getattr and replaced with its wrapped version.
+        :return: wrapped callable if method is not None else None
+        """
+        set_method = False
+        if method is None:
+            method = getattr(self, name)
+            set_method = True
+        method = self._wrap(method, name)
 
-            # make sure callable is not an attribute of a an attribute (i.e. a stored class)
-            if entry in self.__class__.__dict__.keys():
-                monitored.append(entry)
-            elif hasattr(super(self.__class__, self), entry):
-                monitored.append(entry)
+        if set_method:
+            setattr(self, name, method)
+        else:
+            return method
 
-        # remove excluded methods from monitoring
-        monitored = [method for method in monitored if not any([exclusion in method for exclusion in exclusions])]
-
-        # replace method with wrapped version of itself
-        for method in monitored:
-            setattr(self, method, self._monitor(getattr(self, method)))
-
-        print('\nmonitoring following methods:')
-        print('-----------------------------')
-        for method in monitored:
-            print(method)
-        print()
-
-    def _monitor(self, func):
+    def _wrap(self, func, name):
         """
         intercept return values of func and store them in the hdf5 file before returning them
         :param func: method to wrap
         :return: wrapped method
         """
-        if type(func) is partial:
-            name = func.func.__name__
-        else:
-            name = func.__name__
 
         @wraps(func)
-        def monitored(*args, step=None, **kwargs):
+        def monitored(*args, key=None, **kwargs):
 
             results = func(*args, **kwargs)
 
-            if step is None:
-                step = time()
+            if key is None:
+                key = time()
 
             # only write to storage if method returns something
             if results is not None:
-                self._store(results, name, step)
+                self._store(results, name, key)
 
             return results
 
         return monitored
 
-    def _store(self, results, group_name, step):
+    def _store(self, results, group_name, key):
         """
         writes results to specified group in the hdf5 file
         :param results: results as returned by some method
@@ -386,7 +259,7 @@ class MonitorMixin(object):
         if storage.name is None:
             return None
 
-        key = f'{step}'
+        key = f'{key}'
         group = storage.require_group(group_name)
 
         # case where the result has internal structure (i.e. is an object)
@@ -437,17 +310,3 @@ class CheckpointMixin(object):
             optimizer = getattr(self, 'optimizer')
             optimizer.load_state_dict(checkpoint['optimizer'])
             print('done!')
-
-
-class EventCheckpointMixin(CheckpointMixin):
-
-    @staticmethod
-    def setup_loading_chechpoint(*, checkpoint):
-        """
-        register an event to load a checkpoint before training
-        :param checkpoint: filename of the checkpoint
-        :return: None
-        """
-
-        load_checkpoint = partial(CheckpointMixin.load, checkpoint=checkpoint)
-        setattr(EventTestSampleMixin, events.BEFORE_TRAINING, load_checkpoint)
