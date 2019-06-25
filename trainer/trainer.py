@@ -157,6 +157,11 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
             return sample.__class__(([self._cast(s) for s in sample]))
 
     def forward_pass(self, sample):
+        """
+        forward pass including input transformation and splitting, model prediction and loss calculation
+        :param sample: sample from the dataloader
+        :return: tuple of model prediction and loss
+        """
 
         inputs, targets = self._transform(sample)
         outputs = self.model(inputs)
@@ -165,6 +170,11 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         return outputs, loss
 
     def backward_pass(self, loss):
+        """
+        backward pass including resetting gradients, gradient calculation and optimizer step
+        :param loss: loss tensor
+        :return: None
+        """
 
         self.optimizer.zero_grad()
         self.optimizer.backward(loss)
@@ -200,10 +210,26 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
     @staticmethod
     def _backward(loss):
+        """
+        Calls backward on loss tensor. Used to unify the API for PyTorch and apex optimizers
+        :param loss: loss tensor
+        :return: None
+        """
 
         loss.backward()
 
     def register_event_handler(self, event, handler, interval=None, monitor=True, name=None, **kwargs):
+        """
+        register a function that will be called on the specified event
+        :param event: event on which the handler is called, should be one of the events in events.py
+        :param handler: event handler
+        :param interval: interval at which the handler should be run - only useful for the events each epoch or each
+        step if you dont want to run the handler every step but e.g. every 10th step instead
+        :param monitor: bool indicating whether the return value of the handler should be recorded, default True
+        :param name: name under which the return values of the handler should be stored
+        :param kwargs: keyword arguments for the handler
+        :return:None
+        """
         name = handler.__name__ if name is None else name
 
         # make handler interval based
@@ -221,7 +247,15 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.events[event].append(handler)
 
     @classmethod
-    def from_config(cls, filename):
+    def from_config(cls, filename, copy_config=True):
+        """
+        initialize a trainer instance from a config
+        :param filename: name of the config python module, should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
+        and LOGDIR and corresponding dicts of the same name in lower case, which specify keyword arguments.
+        Additionally, a dict for dataloader is also needed.
+        :param copy_config: bool indicating whether the config module should be copied to LOGDIR
+        :return: trainer instance
+        """
 
         # import config
         spec = importlib.util.spec_from_file_location("config", filename)
@@ -247,6 +281,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
                       dataloader=dataloader, logdir=logdir, **config.trainer)
 
         # save config
-        shutil.copy(config.__file__, logdir)
+        if copy_config:
+            shutil.copy(config.__file__, logdir)
 
         return trainer
