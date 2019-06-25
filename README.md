@@ -31,4 +31,9 @@ Optionally the APEX variable and apex dict can be specified to wrap the OPTIMIZE
 Once initialized, you can register event handlers using the method register_event_handler, specifying the handler and the event on which it will be called.
 There are four possible events: before training, each step, each epoch and after training.
 
-training is the executed using the train method and passing either n_epoch or n_steps.
+Training is then executed using the train method and passing either n_epochs or n_steps.
+
+# Example
+In the folder titled 'examples' I have set up a simple case of training a feed-forward neural net on a portion of MNIST.
+This examples illustrates how to setup the config and how to use the trainer. Try running dummy_training.py if you want
+to train the model.
