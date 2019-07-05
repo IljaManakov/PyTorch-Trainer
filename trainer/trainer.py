@@ -23,9 +23,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 
 from collections import Sequence
 from functools import partial
-import importlib.util
 import os
-import shutil
 
 import numpy as np
 import torch as pt
@@ -33,7 +31,7 @@ from torch.utils.data import DataLoader
 
 from trainer.mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin
 from trainer import events
-from trainer.utils import weight_init, IntervalBased
+from trainer.utils import weight_init, IntervalBased, Config
 
 
 class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin):
@@ -247,26 +245,28 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.events[event].append(handler)
 
     @classmethod
-    def from_config(cls, filename, copy_config=True):
+    def from_config(cls, config: Config, copy_config=True, altered=False):
         """
         initialize a trainer instance from a config
-        :param filename: name of the config python module, should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
+        :param config: name of the config file (.py file), should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
         and LOGDIR and corresponding dicts of the same name in lower case, which specify keyword arguments.
-        Additionally, a dict for dataloader is also needed.
+        Additionally, a dict for dataloader and trainer is also needed.
         :param copy_config: bool indicating whether the config module should be copied to LOGDIR
+        :param altered: indicates whether the config module's variable have been altered after import.
+        if False, the original file of the module will be copied otherwise the module variables will be dumped.
         :return: trainer instance
         """
 
-        # import config
-        spec = importlib.util.spec_from_file_location("config", filename)
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        # config = importlib.import_module(filename)
+        parameters = ['LOGDIR', 'MODEL', 'DATASET', 'OPTIMIZER', 'LOSS',
+                      'model', 'dataset', 'dataloader', 'optimizer', 'loss', 'trainer']
+        verified = [hasattr(config, parameter) for parameter in parameters]
+        assert all(verified), f'config must contain the following parameters: {parameters}'
 
         # initialize output directory
         if not os.path.isdir(config.LOGDIR):
             os.makedirs(config.LOGDIR)
 
+        # initialize components
         model = config.MODEL(**config.model)
         model.apply(weight_init)
         dataset = config.DATASET(**config.dataset)
@@ -277,11 +277,46 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
             optimizer = config.APEX(optimizer, **config.apex)
         logdir = config.LOGDIR
 
+        # initialize Trainer instance
         trainer = cls(model=model, criterion=criterion, optimizer=optimizer,
                       dataloader=dataloader, logdir=logdir, **config.trainer)
 
         # save config
         if copy_config:
-            shutil.copy(config.__file__, logdir)
+            config.save(os.path.join(logdir, 'config.py'), not altered)
+
+        return trainer
+
+    @classmethod
+    def from_config_module(cls, config, copy_config=True, altered=False):
+        """
+        initialize a trainer instance from a config
+        :param config: name of the config file (.py file), should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
+        and LOGDIR and corresponding dicts of the same name in lower case, which specify keyword arguments.
+        Additionally, a dict for dataloader and trainer is also needed.
+        :param copy_config: bool indicating whether the config module should be copied to LOGDIR
+        :param altered: indicates whether the config module's variable have been altered after import.
+        if False, the original file of the module will be copied otherwise the module variables will be dumped.
+        :return: trainer instance
+        """
+
+        config = Config.from_module(config)
+        trainer = cls.from_config(config, copy_config, altered)
+
+        return trainer
+        
+    @classmethod
+    def from_config_file(cls, config, copy_config=True):
+        """
+        initialize a trainer instance from a config
+        :param config: name of the config file (.py file), should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
+        and LOGDIR and corresponding dicts of the same name in lower case, which specify keyword arguments.
+        Additionally, a dict for dataloader is also needed.
+        :param copy_config: bool indicating whether the config module should be copied to LOGDIR
+        :return: trainer instance
+        """
+
+        config = Config.from_file(config)
+        trainer = Trainer.from_config(config, copy_config)
 
         return trainer
