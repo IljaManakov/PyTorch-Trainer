@@ -51,19 +51,12 @@ class SaveMixin(object):
 
         for key, value in self.__dict__.items():
 
-            # check if value is instance of classes in save_config
-            cls = None
-            for obj in save_config.keys():
-                if isinstance(value, obj):
-                    cls = obj
-                    break
-
             # apply conversion method specified in save_config for that class
-            if cls is not None:
+            if value in save_config.keys():
 
                 # find conversion method for present value
                 for level in (value, self, object, type):
-                    conversion = getattr(level, save_config[cls], None)
+                    conversion = getattr(level, save_config[value], None)
                     if conversion is not None:
                         break
 
@@ -140,7 +133,8 @@ class ValidationMixin(object):
 class TestSampleMixin(object):
     """used to perform inference on a single sample"""
 
-    def test_on_sample(self, *args, sample, model, criterion, **kwargs):
+    @staticmethod
+    def test_on_sample(*args, sample, model, criterion, **kwargs):
         """
         perform inference on the test sample
         :return: result of inference as namedtuple('prediction', 'loss')
