@@ -27,6 +27,7 @@ from functools import wraps
 from time import time, ctime
 
 import h5py
+import numpy as np
 import torch as pt
 from trainer.utils import to_numpy
 
@@ -304,3 +305,15 @@ class CheckpointMixin(object):
             optimizer = getattr(self, 'optimizer')
             optimizer.load_state_dict(checkpoint['optimizer'])
             print('done!')
+
+
+class SeedMixin(object):
+
+    @staticmethod
+    def set_seed(seed):
+        pt.backends.cudnn.deterministic = True
+        pt.backends.cudnn.benchmark = False
+        np.random.seed(seed)
+        pt.manual_seed(seed)
+        pt.cuda.manual_seed_all(seed)
+

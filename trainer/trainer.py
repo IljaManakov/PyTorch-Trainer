@@ -29,7 +29,7 @@ import numpy as np
 import torch as pt
 from torch.utils.data import DataLoader
 
-from trainer.mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin
+from trainer.mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin, SeedMixin
 from trainer import events
 from trainer.utils import weight_init, IntervalBased, Config
 
@@ -261,6 +261,10 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
                       'model', 'dataset', 'dataloader', 'optimizer', 'loss', 'trainer']
         verified = [hasattr(config, parameter) for parameter in parameters]
         assert all(verified), f'config must contain the following parameters: {parameters}'
+
+        # set seed to value specified in config, otherwise 0 by default
+        seed = getattr(config, 'seed', 0)
+        SeedMixin.set_seed(seed)
 
         # initialize output directory
         if not os.path.isdir(config.LOGDIR):
