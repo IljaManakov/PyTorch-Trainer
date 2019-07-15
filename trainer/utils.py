@@ -270,7 +270,8 @@ class Config(Imports):
                       bool: lambda x: x,
                       type: lambda x: self._parse_type(x),
                       FunctionType: lambda x: self._parse_callable_in_dict(x),
-                      BuiltinFunctionType: lambda x: self._parse_callable_in_dict(x)}
+                      BuiltinFunctionType: lambda x: self._parse_callable_in_dict(x),
+                      dict: lambda x: self._parse_dict(x)}
 
         # convert variables in the dictionary
         output = {key: conversion[type(value)](value) for key, value in dictionary.items()}
