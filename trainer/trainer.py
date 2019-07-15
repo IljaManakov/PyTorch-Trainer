@@ -245,7 +245,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.events[event].append(handler)
 
     @classmethod
-    def from_config(cls, config: Config, copy_config=True, altered=False):
+    def from_config(cls, config: Config, copy_config=True, altered=False, seed=None):
         """
         initialize a trainer instance from a config
         :param config: name of the config file (.py file), should contain the variables MODEL, DATASET, LOSS, OPTIMIZER
@@ -254,6 +254,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         :param copy_config: bool indicating whether the config module should be copied to LOGDIR
         :param altered: indicates whether the config module's variable have been altered after import.
         if False, the original file of the module will be copied otherwise the module variables will be dumped.
+        :param seed: random seed for initialization, overrides seed in the config
         :return: trainer instance
         """
 
@@ -263,7 +264,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         assert all(verified), f'config must contain the following parameters: {parameters}'
 
         # set seed to value specified in config, otherwise 0 by default
-        seed = getattr(config, 'seed', 0)
+        seed = getattr(config, 'seed', 0) if seed is None else seed
         SeedMixin.set_seed(seed)
 
         # initialize output directory
