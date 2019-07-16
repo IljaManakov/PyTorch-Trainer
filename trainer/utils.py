@@ -238,10 +238,21 @@ class Config(Imports):
         :param kwargs: parameters of the config
         """
         self.__dict__.update(kwargs.copy())
-        self.parameters = kwargs.keys()
+        self.parameters = list(kwargs.keys())
         super(Config, self).__init__(imports)
         self.file = file
 
+    def __repr__(self):
+        return self.dump()
+        
+    def __setattr__(self, key, value):
+        """
+        append names of new attrs to parameters
+        """
+        if key not in ('parameters', 'file', 'imports', 'aliases') and key not in self.parameters:
+            self.parameters.append(key)
+        return super(Config, self).__setattr__(key, value)
+        
     @classmethod
     def from_module(cls, module):
         """
