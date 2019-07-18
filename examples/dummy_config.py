@@ -34,3 +34,5 @@ trainer = {
     'loss_decay': 0.95
 }
 
+cuda = True
+dtype = pt.float32
