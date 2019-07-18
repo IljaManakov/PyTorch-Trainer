@@ -257,17 +257,10 @@ class MonitorMixin(object):
         key = f'{key}'
         group = storage.require_group(group_name)
 
-        # case where the result has internal structure (i.e. is an object)
-        if hasattr(results, '__dict__'):
-
-            # obtain public fields from the object
-            fields = [field for field in results.__dict__ if not field.startswith('_')]
-            for field in fields:
-                key = '/'.join([key, field])
-                group[key] = getattr(results, field)
+        results = to_numpy(results)
 
         # case where the result is a namedtuple
-        elif hasattr(results, '_fields'):
+        if isinstance(results, tuple) and hasattr(results, '_fields'):
 
             # obtain fields from namedtuple
             for field in getattr(results, '_fields'):
