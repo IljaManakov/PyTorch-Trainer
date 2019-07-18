@@ -52,12 +52,21 @@ class SaveMixin(object):
 
         for key, value in self.__dict__.items():
 
+            # check if value is instance of classes in save_config
+            cls = None
+            conversion_name = None
+            for obj, call in save_config.items():
+                if isinstance(value, obj):
+                    cls = obj
+                    conversion_name = call
+                    break
+
             # apply conversion method specified in save_config for that class
-            if value in save_config.keys():
+            if cls is not None and conversion_name is not None:
 
                 # find conversion method for present value
                 for level in (value, self, object, type):
-                    conversion = getattr(level, save_config[value], None)
+                    conversion = getattr(level, conversion_name, None)
                     if conversion is not None:
                         break
 
