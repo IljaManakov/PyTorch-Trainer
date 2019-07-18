@@ -64,7 +64,6 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.loss_decay = loss_decay
         self.epochs = 0
         self.steps = 0
-        self.call_after_single_step = []
         self.split_sample = split_sample if callable(split_sample) else self._split_sample
         self.events = {'before_training': [],
                        'each_step': [],
