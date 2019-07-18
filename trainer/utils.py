@@ -90,7 +90,7 @@ def to_numpy(sample):
     :param sample: individual or sequence of Tensors, ints, floats or strings
     :return: same as sample but all Tensors are converted to numpy.ndarray
     """
-    if isinstance(sample, int) or isinstance(sample, float) or isinstance(sample, str):
+    if isinstance(sample, str):
         return sample
     elif isinstance(sample, pt.Tensor):
         return sample.detach().cpu().numpy()
@@ -99,6 +99,8 @@ def to_numpy(sample):
         return collection(*[to_numpy(s) for s in sample])
     elif isinstance(sample, Sequence):
         return [to_numpy(s) for s in sample]
+    else:
+        return sample
 
 
 class IntervalBased(object):
