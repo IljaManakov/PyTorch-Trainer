@@ -135,6 +135,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         sample = self.transformation(sample)
         inputs, targets = self.split_sample(sample)
         inputs = self._cast(inputs)
+        targets = targets.cuda() if self.cuda else targets
 
         return inputs, targets
 
@@ -162,7 +163,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
         inputs, targets = self._transform(sample)
         outputs = self.model(inputs)
-        loss = self.criterion(outputs, targets)
+        loss = self.criterion(outputs.float(), targets)
 
         return outputs, loss
 
@@ -272,6 +273,10 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
         # initialize components
         model = config.MODEL(**config.model)
+        if getattr(config, 'cuda', 0):
+            model = model.cuda()
+        if hasattr(config, 'dtype'):
+            model = model.type(config.dtype)
         model.apply(weight_init)
         dataset = config.DATASET(**config.dataset)
         dataloader = DataLoader(dataset, **config.dataloader)
