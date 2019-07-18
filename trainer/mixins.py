@@ -128,7 +128,7 @@ class ValidationMixin(object):
                     continue
                 losses.append(to_numpy(loss))
 
-        return losses
+        return np.stack(losses)
 
 
 class TestSampleMixin(object):
