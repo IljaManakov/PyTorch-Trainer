@@ -94,11 +94,11 @@ def to_numpy(sample):
         return sample
     elif isinstance(sample, pt.Tensor):
         return sample.detach().cpu().numpy()
-    elif isinstance(sample, tuple) or isinstance(sample, list):
-        return [to_numpy(s) for s in sample]
-    elif isinstance(sample, Sequence):
+    elif isinstance(sample, tuple) and hasattr(sample, '_fields'):  # namedtuple
         collection = sample.__class__
         return collection(*[to_numpy(s) for s in sample])
+    elif isinstance(sample, Sequence):
+        return [to_numpy(s) for s in sample]
 
 
 class IntervalBased(object):
