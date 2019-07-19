@@ -183,9 +183,9 @@ class MonitorMixin(object):
 
         # open hdf5 file
         if os.path.isfile(filename):
-            mode = 'w'
-        else:
             mode = 'a'
+        else:
+            mode = 'w'
 
         storage = h5py.File(filename, mode, libver='latest', swmr=True)
 
