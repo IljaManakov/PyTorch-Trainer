@@ -36,3 +36,4 @@ trainer = {
 
 cuda = True
 dtype = pt.float32
+seed = 0
