@@ -1,8 +1,9 @@
-from trainer import Trainer, events
+from trainer import Trainer, events, Config
 from examples.dummy_components import MNIST
 from torch.utils.data import DataLoader
 
-trainer = Trainer.from_config_file('dummy_config.py')
+config = Config.from_file('dummy_config.py')
+trainer = Trainer.from_config(config, altered=True)  # altered is set as a test to see if Config.dump works
 sample = trainer._transform(next(iter(trainer.dataloader)))
 validation_loader = DataLoader(MNIST('validation.pt'))
 

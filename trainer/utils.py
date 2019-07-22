@@ -338,17 +338,15 @@ class Config(Imports):
         """
 
         conversion = {str: lambda varname, var: f'{varname} = \'{var}\'',
-                      int: lambda varname, var: f'{varname} = {var}',
-                      float: lambda varname, var: f'{varname} = {var}',
-                      bool: lambda varname, var: f'{varname} = {var}',
                       dict: lambda varname, var: f'{varname} = {self._parse_dict(var)}',
                       type: lambda varname, var: f'{varname} = {self._parse_type(var)}',
                       FunctionType: lambda varname, var: f'{inspect.getsource(var)}',
                       BuiltinFunctionType: lambda varname, var: f'{inspect.getsource(var)}'}
+        default = lambda varname, var: f'{varname} = {var}'
 
         var = getattr(self, varname)
 
-        return f'\n{conversion[type(var)](varname, var)}\n'
+        return f'\n{conversion.get(type(var), default)(varname, var)}\n'
 
     def dump(self):
         """
