@@ -278,16 +278,14 @@ class Config(Imports):
 
         # define conversion function for variable types
         conversion = {str: lambda x: f'\'{x}\'',
-                      int: lambda x: x,
-                      float: lambda x: x,
-                      bool: lambda x: x,
                       type: lambda x: self._parse_type(x),
                       FunctionType: lambda x: self._parse_callable_in_dict(x),
                       BuiltinFunctionType: lambda x: self._parse_callable_in_dict(x),
                       dict: lambda x: self._parse_dict(x)}
+        default = lambda x : x
 
         # convert variables in the dictionary
-        output = {key: conversion[type(value)](value) for key, value in dictionary.items()}
+        output = {key: conversion.get(type(value), default)(value) for key, value in dictionary.items()}
 
         # construct string representation of the dictionary
         if not output:
