@@ -29,12 +29,14 @@ import numpy as np
 import torch as pt
 from torch.utils.data import DataLoader
 
-from trainer.mixins import SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin, SeedMixin
+from trainer.mixins import SaveMixin, MonitorMixin, CheckpointMixin
 from trainer import events
-from trainer.utils import weight_init, IntervalBased, Config
+from trainer.config import Config
+from trainer.utils import weight_init, IntervalBased, set_seed, validate, test_on_sample, show_progress
+from trainer.handlers import TrainingLoss
 
 
-class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, CheckpointMixin):
+class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
     """class that implements the basic logic of training a model for streamlined training"""
 
     def __init__(self, *, model, criterion, optimizer, dataloader, logdir='.', storage='storage.hdf5',
@@ -57,7 +59,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.optimizer = optimizer
         self.dataloader = dataloader
         self.logdir = logdir
-        self.storage = self.open_storage(filename=os.path.join(logdir, storage))
+        self.storage = os.path.join(logdir, storage)
         self.transformation = transformation
         self.cuda = next(model.parameters()).is_cuda
         self.dtype = next(model.parameters()).dtype
@@ -65,16 +67,21 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.epochs = 0
         self.steps = 0
         self.split_sample = split_sample if callable(split_sample) else self._split_sample
-        self.events = {'before_training': [],
-                       'each_step': [],
-                       'each_epoch': [],
-                       'after_training': [self.close_storage]}
+
+        self.events = {event: [] for event in events.event_list}
+        self.register_event_handler(events.AFTER_TRAINING, self.save, directory=self.logdir)
+        self.register_event_handler(events.AFTER_TRAINING, self.close_storage)
+        self.register_event_handler(events.EACH_STEP, TrainingLoss())
 
         super().__init__()
 
         # unify backward call for all types of optimizer
         if not hasattr(self.optimizer, 'backward'):
             setattr(self.optimizer, 'backward', self._backward)
+
+    def __call__(self, sample, **kwargs):
+
+        return test_on_sample(sample=sample, forward_pass=self.forward_pass)
 
     def train(self, *, n_epochs=None, n_steps=None):
         """
@@ -85,7 +92,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
         try:
             for event in self.events[events.BEFORE_TRAINING]:
-                event(self)
+                event(trainer=self)
 
             if n_epochs is None and n_steps is None:
                 raise ValueError('either n_epochs or n_steps need to be specified')
@@ -106,26 +113,28 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
                     if cumulative_loss is None:
                         cumulative_loss = np.sum([loss])
                     cumulative_loss = round(self.loss_decay*cumulative_loss + (1-self.loss_decay) * np.sum([loss]), 6)
-                    self.show_progress(epoch, step, n_epochs, n_steps, cumulative_loss)
+                    show_progress(epoch, step, n_epochs, n_steps, len(self.dataloader), cumulative_loss)
 
                     # end training after n_steps if n_steps is set
                     self.steps += 1
-                    if step == n_steps:
+                    if self.steps == n_steps:
                         return
 
                     for event in self.events[events.EACH_STEP]:
-                        event(self, key=(epoch, step))
+                        event(trainer=self, key=self.steps, loss=loss, step=step, epoch=epoch)
 
                 for event in self.events[events.EACH_EPOCH]:
-                    event(self, key=(epoch, step))
-
-                self.epochs += 1
+                    event(trainer=self, key=self.steps, epoch=epoch)
 
         finally:
             if hasattr(self.dataloader.dataset, 'close'):
                 self.dataloader.dataset.close()
             for event in self.events[events.AFTER_TRAINING]:
-                event(self)
+                event(trainer=self)
+
+    def validate(self, dataloader, **kwargs):
+
+        return validate(dataloader=dataloader, forward_pass=self.forward_pass)
 
     def _transform(self, sample):
         """
@@ -178,23 +187,6 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         self.optimizer.backward(loss)
         self.optimizer.step()
 
-    def show_progress(self, epoch, step, n_epochs, n_steps, loss):
-        """
-        print the current progress and loss
-        :param epoch: current epoch
-        :param step: current step
-        :param n_epochs: number of epoch in training
-        :param n_steps: number of steps in training
-        :param loss: current loss
-        """
-
-        steps_in_epoch = len(self.dataloader)
-        n_steps = n_steps if n_steps is not None else n_epochs * steps_in_epoch - 1
-        steps_taken = epoch * steps_in_epoch + step
-        progress = round(100 * steps_taken / n_steps, 2)
-
-        print(f'progress: {progress}%, epoch: {epoch}, step: {step}, loss: {loss}')
-
     @staticmethod
     def _split_sample(sample):
         """
@@ -216,7 +208,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
         loss.backward()
 
-    def register_event_handler(self, event, handler, interval=None, monitor=True, name=None, **kwargs):
+    def register_event_handler(self, event, handler, *, interval=None, monitor=True, name=None, **kwargs):
         """
         register a function that will be called on the specified event
         :param event: event on which the handler is called, should be one of the events in events.py
@@ -258,6 +250,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
         :return: trainer instance
         """
 
+        # verify that config has all necessary variables
         parameters = ['LOGDIR', 'MODEL', 'DATASET', 'OPTIMIZER', 'LOSS',
                       'model', 'dataset', 'dataloader', 'optimizer', 'loss', 'trainer']
         verified = [hasattr(config, parameter) for parameter in parameters]
@@ -265,7 +258,7 @@ class Trainer(SaveMixin, TestSampleMixin, ValidationMixin, MonitorMixin, Checkpo
 
         # set seed to value specified in config, otherwise 0 by default
         seed = getattr(config, 'seed', 0) if seed is None else seed
-        SeedMixin.set_seed(seed)
+        set_seed(seed)
 
         # initialize output directory
         if not os.path.isdir(config.LOGDIR):
