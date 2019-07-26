@@ -22,12 +22,11 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 """
 
 import os
-from collections import namedtuple
 from functools import wraps
 from time import time, ctime
+import warnings
 
 import h5py
-import numpy as np
 import torch as pt
 from trainer.utils import to_numpy
 
@@ -45,7 +44,7 @@ class SaveMixin(object):
         """
 
         if save_config is None:
-            save_config = self.default_save_config.copy()
+            save_config = self.default_save_config().copy()
 
         # find all objects that need to be saved
         objects = {}
@@ -75,7 +74,7 @@ class SaveMixin(object):
 
         # set default save path if it is None
         if checkpoint_name is not None:
-            checkpoint = f'checkpoint_{checkpoint_name}'
+            checkpoint = f'checkpoint_{checkpoint_name}.pt'
         else:
             checkpoint = f'checkpoint_{ctime().replace(" ", "-")}.pt'
 
@@ -93,15 +92,15 @@ class SaveMixin(object):
         """
         return to_numpy(sample)
 
-    @property
-    def default_save_config(self):
+    @staticmethod
+    def default_save_config():
         """initialize the default save config that saves pytorch Modules, Tensors and Optimizers
          as well as strings, floats and ints. If apex is installed FP16_Optimizers are also saved"""
         save_config = {pt.nn.Module: 'state_dict',
                        pt.optim.Optimizer: 'state_dict',
                        pt.Tensor: '_to_numpy',
                        int: '__int__',
-                       str: '__str__',
+                       # str: '__str__',
                        float: '__float__'}
 
         try:
@@ -242,7 +241,7 @@ class MonitorMixin(object):
 
 class CheckpointMixin(object):
 
-    def load(self, *args, checkpoint ):
+    def load(self, checkpoint, **kwargs):
         """
         load a checkpoint that can contain model and optimizer state
         :param checkpoint: filename of the checkpoint
@@ -251,16 +250,31 @@ class CheckpointMixin(object):
 
         checkpoint = pt.load(checkpoint)
 
-        # load model state
-        if hasattr(self, 'model') and 'model' in checkpoint.keys():
-            print('loading model checkpoint ...', end='')
-            model = getattr(self, 'model')
-            model.load_state_dict(checkpoint['model'])
-            print('done!')
+        # load components
+        for key in checkpoint.keys():
 
-        # load optimizer state
-        if hasattr(self, 'optimizer') and 'optimizer' in checkpoint.keys():
-            print('loading optimizer checkpoint...', end='')
-            optimizer = getattr(self, 'optimizer')
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print('done!')
+            if not hasattr(self, key) or not checkpoint[key]:
+                continue
+
+            print(f'loading {key} checkpoint...', end='')
+            if key == 'model' or key == 'optimzer':
+                getattr(self, key).load_state_dict(checkpoint[key])
+            else:
+                setattr(self, key, checkpoint[key])
+            print('done')
+
+    @staticmethod
+    def list_checkpoints(directory):
+
+        checkpoints = [os.path.join(directory, file) for file in os.listdir(directory) if 'checkpoint' in file]
+        checkpoints.sort(key=os.path.getmtime)
+
+        return checkpoints
+
+    def load_latest(self, directory, **kwargs):
+
+        checkpoints = self.list_checkpoints(directory)
+        if checkpoints:
+            self.load(checkpoints[-1])
+        else:
+            warnings.warn(f'Checkpoint could not be loaded. No checkpoints found in {directory}.')
