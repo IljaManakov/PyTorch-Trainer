@@ -19,6 +19,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 
 """
 
+from abc import ABC, abstractmethod
+from functools import partial
+from trainer.utils import IntervalBased
 
 EACH_STEP = 'each_step'
 EACH_EPOCH = 'each_epoch'
@@ -26,3 +29,25 @@ BEFORE_TRAINING = 'before_training'
 AFTER_TRAINING = 'after_training'
 
 event_list = [BEFORE_TRAINING, EACH_STEP, EACH_EPOCH, AFTER_TRAINING]
+
+
+class AbstractEventHandler(ABC):
+
+    def __init__(self, func, *, name=None, interval=None, **kwargs):
+
+        self.__name__ = func.__name__ if name is None else name
+
+        # make handler interval based
+        if interval:
+            func = IntervalBased(interval)(func)
+
+        # set defaults for handler
+        if kwargs:
+            handler = partial(func, **kwargs)
+
+        self.func = func
+
+    @abstractmethod
+    def __call__(self, trainer, key=None, loss=None, step=None, epoch=None):
+
+        return self.func(trainer, key=None, loss=None, step=None, epoch=None)
