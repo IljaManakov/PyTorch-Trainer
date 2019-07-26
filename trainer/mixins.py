@@ -75,7 +75,7 @@ class SaveMixin(object):
 
         # set default save path if it is None
         if checkpoint_name is not None:
-            checkpoint = checkpoint_name
+            checkpoint = f'checkpoint_{checkpoint_name}'
         else:
             checkpoint = f'checkpoint_{ctime().replace(" ", "-")}.pt'
 
@@ -113,52 +113,6 @@ class SaveMixin(object):
         return save_config
 
 
-class ValidationMixin(object):
-    """
-    get losses over a validation set
-    """
-
-    @staticmethod
-    def validate(*args, dataloader, forward_pass, **kwargs):
-        """
-        evaluate model on validation set
-        :param dataloader: Dataloader with validation set
-        :param forward_pass: callable that returns (prediction, loss)
-        :return: ndarray of losses
-        """
-
-        losses = []
-        for sample in dataloader:
-
-            with pt.no_grad():
-                try:
-                    prediction, loss = forward_pass(sample)
-                except ValueError:
-                    continue
-                losses.append(to_numpy(loss))
-
-        return np.stack(losses)
-
-
-class TestSampleMixin(object):
-    """used to perform inference on a single sample"""
-
-    @staticmethod
-    def test_on_sample(*args, sample, model, criterion, **kwargs):
-        """
-        perform inference on the test sample
-        :return: result of inference as namedtuple('prediction', 'loss')
-        """
-        input, target = sample
-        with pt.no_grad():
-            prediction = model(input)
-            loss = criterion(prediction, target)
-
-        prediction, loss = to_numpy((prediction, loss))
-
-        return namedtuple('test_on_sample', ('prediction', 'loss'))(prediction, loss)
-
-
 class MonitorMixin(object):
     """
     wraps public methods to intercept outputs and store them in a hdf5 file
@@ -187,7 +141,7 @@ class MonitorMixin(object):
         else:
             mode = 'w'
 
-        storage = h5py.File(filename, mode, libver='latest', swmr=True)
+        storage = h5py.File(filename, mode)#, libver='latest', swmr=True)
 
         return storage
 
@@ -257,11 +211,14 @@ class MonitorMixin(object):
 
         # check if storage is initialized
         if storage is None:
-            return None
+            raise ValueError(f'tried to write to group {group_name} under key {key} but storage attribute is None')
+        elif isinstance(storage, str):
+            storage = self.open_storage(filename=storage)
+            setattr(self, 'storage', storage)
 
         # check if storage is open
         if storage.name is None:
-            return None
+            raise ValueError(f'tried to write to group {group_name} under key {key} but storage was already closed')
 
         key = f'{key}'
         group = storage.require_group(group_name)
@@ -285,7 +242,7 @@ class MonitorMixin(object):
 
 class CheckpointMixin(object):
 
-    def load(self, *args, checkpoint):
+    def load(self, *args, checkpoint ):
         """
         load a checkpoint that can contain model and optimizer state
         :param checkpoint: filename of the checkpoint
@@ -307,15 +264,3 @@ class CheckpointMixin(object):
             optimizer = getattr(self, 'optimizer')
             optimizer.load_state_dict(checkpoint['optimizer'])
             print('done!')
-
-
-class SeedMixin(object):
-
-    @staticmethod
-    def set_seed(seed):
-        pt.backends.cudnn.deterministic = True
-        pt.backends.cudnn.benchmark = False
-        np.random.seed(seed)
-        pt.manual_seed(seed)
-        pt.cuda.manual_seed_all(seed)
-
