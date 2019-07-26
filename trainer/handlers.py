@@ -1,3 +1,5 @@
+from torch.optim import Optimizer
+
 from trainer.events import AbstractEventHandler
 from trainer.mixins import SaveMixin
 
@@ -12,8 +14,10 @@ class EventSave(AbstractEventHandler):
         super().__init__(func, name=name, interval=interval)
 
     def __call__(self, trainer, key=None, loss=None, step=None, epoch=None):
-        checkpoint_name = f'epoch-{epoch+1}' if step is None else f'epoch-{epoch}_step-{step}'
-        self.func(trainer, directory=trainer.logdir, checkpoint_name=checkpoint_name)
+        checkpoint_name = f'epoch-{epoch}' if step is None else f'epoch-{epoch}_step-{step}'
+        save_config = SaveMixin.default_save_config().copy()
+        save_config.pop(Optimizer)
+        self.func(trainer, directory=trainer.logdir, checkpoint_name=checkpoint_name, save_config=save_config)
         return checkpoint_name
 
 
