@@ -61,13 +61,14 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
         self.logdir = logdir
         self.storage = os.path.join(logdir, storage)
         self.transformation = transformation
-        self.cuda = next(model.parameters()).is_cuda
+        self.cuda = bool(next(model.parameters()).is_cuda)
         self.dtype = next(model.parameters()).dtype
         self.loss_decay = loss_decay
         self.epochs = 0
         self.steps = 0
         self.split_sample = split_sample if callable(split_sample) else self._split_sample
 
+        # register base handlers
         self.events = {event: [] for event in events.event_list}
         self.register_event_handler(events.AFTER_TRAINING, self.save, directory=self.logdir)
         self.register_event_handler(events.AFTER_TRAINING, self.close_storage)
@@ -83,12 +84,18 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
 
         return test_on_sample(sample=sample, forward_pass=self.forward_pass)
 
-    def train(self, *, n_epochs=None, n_steps=None):
+    def train(self, *, n_epochs=None, n_steps=None, resume=False):
         """
         train the model
         :param n_epochs: number of epochs to train
         :param n_steps: number of steps to train, overrides n_epochs
+        :param resume: if True load latest checkpoint in logdir. If directory, load latest checkpoint in directory
         """
+
+        # register checkpoint loading
+        if resume:
+            resume = resume if isinstance(resume, str) else self.logdir
+            self.register_event_handler(events.BEFORE_TRAINING, self.load_latest, directory=resume)
 
         try:
             for event in self.events[events.BEFORE_TRAINING]:
@@ -102,7 +109,7 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
                 n_epochs = 2**32
 
             cumulative_loss = None
-            for epoch in range(n_epochs):
+            while self.epochs < n_epochs:
                 for step, sample in enumerate(self.dataloader):
 
                     prediction, loss = self.forward_pass(sample)
@@ -113,7 +120,7 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
                     if cumulative_loss is None:
                         cumulative_loss = np.sum([loss])
                     cumulative_loss = round(self.loss_decay*cumulative_loss + (1-self.loss_decay) * np.sum([loss]), 6)
-                    show_progress(epoch, step, n_epochs, n_steps, len(self.dataloader), cumulative_loss)
+                    show_progress(self.epochs, step, n_epochs, n_steps, len(self.dataloader), cumulative_loss)
 
                     # end training after n_steps if n_steps is set
                     self.steps += 1
@@ -121,10 +128,11 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
                         return
 
                     for event in self.events[events.EACH_STEP]:
-                        event(trainer=self, key=self.steps, loss=loss, step=step, epoch=epoch)
+                        event(trainer=self, key=self.steps, loss=loss, step=step, epoch=self.epochs)
 
+                self.epochs += 1
                 for event in self.events[events.EACH_EPOCH]:
-                    event(trainer=self, key=self.steps, epoch=epoch)
+                    event(trainer=self, key=self.steps, epoch=self.epochs)
 
         finally:
             if hasattr(self.dataloader.dataset, 'close'):
