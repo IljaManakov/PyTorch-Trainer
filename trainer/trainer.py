@@ -59,7 +59,7 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
         self.optimizer = optimizer
         self.dataloader = dataloader
         self.logdir = logdir
-        self.storage = os.path.join(logdir, storage)
+        self.storage = os.path.join(logdir, storage) if storage is not None else None
         self.transformation = transformation
         self.cuda = bool(next(model.parameters()).is_cuda)
         self.dtype = next(model.parameters()).dtype
@@ -72,7 +72,8 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
         self.events = {event: [] for event in events.event_list}
         self.register_event_handler(events.AFTER_TRAINING, self.save, directory=self.logdir)
         self.register_event_handler(events.AFTER_TRAINING, self.close_storage)
-        self.register_event_handler(events.EACH_STEP, TrainingLoss())
+        if storage is not None:
+            self.register_event_handler(events.EACH_STEP, TrainingLoss())
 
         super().__init__()
 
