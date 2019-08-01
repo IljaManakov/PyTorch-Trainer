@@ -157,21 +157,27 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
 
         return inputs, targets
 
-    def _cast(self, sample, set_dtype=True):
+    def _cast(self, sample, set_dtype=True, other=None):
         """
         matches dtype and cuda status of all Tensors in the sample to those of the model
         :param sample: sample to cast
         :param set_dtype: if True dtype will also be matched, default is True
+        :param other: match dtype and is_cuda of other tensor instead of self.model
         :return: cast sample
         """
+        cuda = self.cuda if other is None else other.is_cuda
+        dtype = self.dtype if other is None else other.dtype
+
         if isinstance(sample, pt.Tensor):
-            sample = sample.type(self.dtype) if set_dtype else sample
-            sample = sample.cuda() if self.cuda else sample
+            sample = sample.type(dtype) if set_dtype else sample
+            sample = sample.cuda() if cuda else sample
             return sample
-        elif isinstance(sample, str):
+        elif isinstance(sample, str):  # catch strings so they are not handled as Sequence instances
             return sample
         elif isinstance(sample, Sequence):
             return sample.__class__(([self._cast(s, set_dtype) for s in sample]))
+        else:
+            return sample  # default case: return unaltered
 
     def forward_pass(self, sample):
         """
@@ -182,7 +188,10 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
 
         inputs, targets = self._transform(sample)
         outputs = self.model(inputs)
-        loss = self.criterion(outputs.float(), targets)
+
+        # cast outputs to float to avoid overflow in loss calculation
+        float_template = pt.ones(1).float().cuda() if self.cuda else pt.ones(1).float()
+        loss = self.criterion(self._cast(outputs, other=float_template), targets)
 
         return outputs, loss
 
