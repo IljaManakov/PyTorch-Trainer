@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pt-trainer",
-    version="0.1.3",
+    version="0.1.4",
     author="Ilja Manakov",
     author_email="ilja.manakov@gmx.de",
     description="A toolkit for training pytorch models",
