@@ -153,24 +153,25 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
         sample = self.transformation(sample)
         inputs, targets = self.split_sample(sample)
         inputs = self._cast(inputs)
-        targets = targets.cuda() if self.cuda else targets
+        targets = self._cast(targets, set_dtype=False)
 
         return inputs, targets
 
-    def _cast(self, sample):
+    def _cast(self, sample, set_dtype=True):
         """
         matches dtype and cuda status of all Tensors in the sample to those of the model
         :param sample: sample to cast
+        :param set_dtype: if True dtype will also be matched, default is True
         :return: cast sample
         """
         if isinstance(sample, pt.Tensor):
-            sample = sample.type(self.dtype)
+            sample = sample.type(self.dtype) if set_dtype else sample
             sample = sample.cuda() if self.cuda else sample
             return sample
         elif isinstance(sample, str):
             return sample
         elif isinstance(sample, Sequence):
-            return sample.__class__(([self._cast(s) for s in sample]))
+            return sample.__class__(([self._cast(s, set_dtype) for s in sample]))
 
     def forward_pass(self, sample):
         """
