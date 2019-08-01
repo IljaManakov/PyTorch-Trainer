@@ -25,6 +25,7 @@ import os
 from functools import wraps
 from time import time, ctime
 import warnings
+from collections import Sequence
 
 import h5py
 import torch as pt
@@ -230,13 +231,27 @@ class MonitorMixin(object):
             # obtain fields from namedtuple
             for field in getattr(results, '_fields'):
                 field_key = '/'.join([key, field])
-                group[field_key] = getattr(results, field)
+                self._write_element(group, field_key, getattr(results, field))
 
         # default case
         else:
-            group[key] = results
+            self._write_element(group, key, results)
 
         storage.flush()
+
+    @staticmethod
+    def _write_element(storage, key, element):
+        """
+        small helper for writing to storage. lists of numpy arrays or torch tensors are not supported by h5py
+        """
+
+        if isinstance(element, str):  # catch strings first because they count as Sequence instances
+            storage[key] = element
+        elif isinstance(element, Sequence):
+            for i, e in enumerate(element):
+                MonitorMixin._write_element(storage, '/'.join([key, str(i)]), e)
+        else:
+            storage[key] = element
 
 
 class CheckpointMixin(object):
