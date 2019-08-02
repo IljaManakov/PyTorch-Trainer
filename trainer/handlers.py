@@ -3,6 +3,11 @@ from torch.optim import Optimizer
 from trainer.events import AbstractEventHandler
 from trainer.mixins import SaveMixin
 
+try:
+    from apex.fp16_utils import FP16_Optimizer
+except ImportError:
+    FP16_Optimizer = None
+
 
 class EventSave(AbstractEventHandler):
     """
@@ -17,6 +22,7 @@ class EventSave(AbstractEventHandler):
         checkpoint_name = f'epoch-{epoch}' if step is None else f'epoch-{epoch}_step-{step}'
         save_config = SaveMixin.default_save_config().copy()
         save_config.pop(Optimizer)
+        save_config.pop(FP16_Optimizer, None)
         self.func(trainer, directory=trainer.logdir, checkpoint_name=checkpoint_name, save_config=save_config)
         return checkpoint_name
 
