@@ -272,7 +272,7 @@ class CheckpointMixin(object):
                 continue
 
             print(f'loading {key} checkpoint...', end='')
-            if key == 'model' or key == 'optimzer':
+            if key == 'model' or key == 'optimizer':
                 getattr(self, key).load_state_dict(checkpoint[key])
             else:
                 setattr(self, key, checkpoint[key])
