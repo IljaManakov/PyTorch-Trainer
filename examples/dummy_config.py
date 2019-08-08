@@ -1,10 +1,12 @@
 from examples.dummy_components import FeedForward, MNIST
 import torch as pt
+from torch.nn import CrossEntropyLoss
+from torch.optim import Adam
 
 MODEL = FeedForward
 DATASET = MNIST
-LOSS = pt.nn.CrossEntropyLoss
-OPTIMIZER = pt.optim.Adam
+LOSS = CrossEntropyLoss
+OPTIMIZER = Adam
 LOGDIR = './run1'
 
 model = {
