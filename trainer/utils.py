@@ -154,7 +154,7 @@ def show_progress(epoch, step, n_epochs, n_steps, steps_in_epoch, loss):
     steps_taken = epoch * steps_in_epoch + step
     progress = round(100 * steps_taken / n_steps, 2)
 
-    print(f'progress: {progress}%, epoch: {epoch}, step: {step}, loss: {loss}')
+    print(f'\rprogress: {progress}%, epoch: {epoch}, step: {step}, loss: {loss}', end='')
 
 
 class IntervalBased(object):
