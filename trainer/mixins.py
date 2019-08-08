@@ -29,7 +29,7 @@ from collections import Sequence
 
 import h5py
 import torch as pt
-from trainer.utils import to_numpy
+from trainer.utils import to_numpy, rgetattr, rsetattr
 
 
 class SaveMixin(object):
@@ -66,7 +66,7 @@ class SaveMixin(object):
 
                 # find conversion method for present value
                 for level in (value, self, object, type):
-                    conversion = getattr(level, conversion_name, None)
+                    conversion = rgetattr(level, conversion_name, None)
                     if conversion is not None:
                         break
 
@@ -141,7 +141,7 @@ class MonitorMixin(object):
         else:
             mode = 'w'
 
-        storage = h5py.File(filename, mode)#, libver='latest', swmr=True)
+        storage = h5py.File(filename, mode, libver='latest', swmr=True)
 
         return storage
 
@@ -163,17 +163,17 @@ class MonitorMixin(object):
         will be replaced with wrapped version. If name and method are specified wrapped function will be returned instead.
         :param name: name of the function / method
         :param method: callable to wrap. If this argument is specified, the passed callable will be wrapped and returned.
-        Otherwilse, the method will be retrieved from self via getattr and replaced with its wrapped version.
+        Otherwilse, the method will be retrieved from self via rgetattr and replaced with its wrapped version.
         :return: wrapped callable if method is not None else None
         """
         set_method = False
         if method is None:
-            method = getattr(self, name)
+            method = rgetattr(self, name)
             set_method = True
         method = self._wrap(method, name)
 
         if set_method:
-            setattr(self, name, method)
+            rsetattr(self, name, method)
         else:
             return method
 
@@ -273,9 +273,9 @@ class CheckpointMixin(object):
 
             print(f'loading {key} checkpoint...', end='')
             if key == 'model' or key == 'optimizer':
-                getattr(self, key).load_state_dict(checkpoint[key])
+                rgetattr(self, key).load_state_dict(checkpoint[key])
             else:
-                setattr(self, key, checkpoint[key])
+                rsetattr(self, key, checkpoint[key])
             print('done')
 
     @staticmethod
