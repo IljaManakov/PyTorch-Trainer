@@ -1,10 +1,24 @@
 from collections import Sequence, namedtuple
-from functools import wraps
+from functools import wraps, reduce
 
 import numpy as np
 import torch as pt
 import torch.nn as nn
 import torch.nn.init as init
+
+
+def rgetattr(obj, attr):
+    return reduce(getattr, [obj] + attr.split('.'))
+
+
+def rsetattr(obj, attr, value):
+    if len(attr.split('.')) == 1:
+        setattr(obj, attr, value)
+    else:
+        split = attr.split('.')
+        branch, leaf = '.'.join(split[:-1]), split[-1]
+        obj = rgetattr(obj, branch)
+        setattr(obj, leaf, value)
 
 
 def weight_init(m):
