@@ -7,8 +7,12 @@ import torch.nn as nn
 import torch.nn.init as init
 
 
-def rgetattr(obj, attr):
-    return reduce(getattr, [obj] + attr.split('.'))
+def rgetattr(obj, attr, default=None):
+    out = default
+    try:
+        out = reduce(getattr, [obj] + attr.split('.'))
+    finally:
+        return out
 
 
 def rsetattr(obj, attr, value):
