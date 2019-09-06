@@ -1,3 +1,5 @@
+from os.path import join
+
 from torch.optim import Optimizer
 
 from trainer.events import AbstractEventHandler
@@ -37,5 +39,9 @@ class TrainingLoss(AbstractEventHandler):
         super().__init__(func, name=name, interval=interval)
 
     def __call__(self, trainer, key=None, loss=None, step=None, epoch=None):
-        return self.func(loss)
+        if loss is not None:
+            loss = self.func(loss)
+            with open(join(trainer.logdir, 'losses.csv'), 'a') as file:
+                print(epoch, step, loss, sep=',', file=file)
+            return self.func(loss)
 

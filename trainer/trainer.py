@@ -72,8 +72,7 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
         self.events = {event: [] for event in events.event_list}
         self.register_event_handler(events.AFTER_TRAINING, self.save, directory=self.logdir)
         self.register_event_handler(events.AFTER_TRAINING, self.close_storage)
-        if storage is not None:
-            self.register_event_handler(events.EACH_STEP, TrainingLoss())
+        self.register_event_handler(events.EACH_STEP, TrainingLoss(), monitor=(storage is not None))
 
         super().__init__()
 
