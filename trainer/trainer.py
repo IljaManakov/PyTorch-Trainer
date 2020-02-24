@@ -173,8 +173,10 @@ class Trainer(SaveMixin, MonitorMixin, CheckpointMixin):
             return sample
         elif isinstance(sample, str):  # catch strings so they are not handled as Sequence instances
             return sample
+        elif hasattr(sample, '_fields'):  # catch namedtuples
+            return sample.__class__(*[self._cast(s, set_dtype) for s in sample])
         elif isinstance(sample, Sequence):
-            return sample.__class__(([self._cast(s, set_dtype) for s in sample]))
+            return sample.__class__([self._cast(s, set_dtype) for s in sample])
         else:
             return sample  # default case: return unaltered
 
