@@ -256,14 +256,15 @@ class MonitorMixin(object):
 
 class CheckpointMixin(object):
 
-    def load(self, checkpoint, **kwargs):
+    def load(self, checkpoint, map_location=None, **kwargs):
         """
         load a checkpoint that can contain model and optimizer state
         :param checkpoint: filename of the checkpoint
+        :param map_location: device to load models to
         :return: None
         """
 
-        checkpoint = pt.load(checkpoint)
+        checkpoint = pt.load(checkpoint, map_location=map_location)
 
         # load components
         for key in checkpoint.keys():
@@ -286,10 +287,10 @@ class CheckpointMixin(object):
 
         return checkpoints
 
-    def load_latest(self, directory, **kwargs):
+    def load_latest(self, directory, map_location=None, **kwargs):
 
         checkpoints = self.list_checkpoints(directory)
         if checkpoints:
-            self.load(checkpoints[-1])
+            self.load(checkpoints[-1], map_location)
         else:
             warnings.warn(f'Checkpoint could not be loaded. No checkpoints found in {directory}.')
